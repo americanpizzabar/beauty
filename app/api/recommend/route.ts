@@ -11,11 +11,11 @@ export async function POST(req: NextRequest) {
 
     if (useDatabase) {
       const concerns = skinProfile.concerns || [];
-      dbProducts = searchProducts(
+      dbProducts = (searchProducts(
         searchQuery,
         skinProfile.skinType,
         concerns
-      ) as Record<string, unknown>[];
+      ) as unknown) as Record<string, unknown>[];
     }
 
     const result = await getRecommendations(
