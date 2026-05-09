@@ -3,9 +3,9 @@ import { getRecommendations } from "@/lib/claude";
 import { searchProducts } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY === "your_api_key_here") {
+  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "your_api_key_here") {
     return NextResponse.json(
-      { error: "APIキーが設定されていません。.env.local に ANTHROPIC_API_KEY を設定してください。" },
+      { error: "APIキーが設定されていません。.env.local に GEMINI_API_KEY を設定してください。" },
       { status: 500 }
     );
   }
