@@ -1,16 +1,31 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-const MODEL = "gemini-2.0-flash";
+const MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"];
 
-function getModel() {
-  return genAI.getGenerativeModel({ model: MODEL });
+async function generateWithFallback(
+  buildContent: () => Parameters<GenerativeModel["generateContent"]>[0]
+): Promise<string> {
+  let lastError: Error | null = null;
+  for (const modelName of MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(buildContent());
+      return result.response.text();
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
+      const msg = lastError.message;
+      if (msg.includes("429") || msg.includes("quota") || msg.includes("limit: 0")) {
+        continue;
+      }
+      throw lastError;
+    }
+  }
+  throw lastError || new Error("All models failed");
 }
 
 export async function analyzeCosmetic(imageBase64: string, mimeType: string) {
-  const model = getModel();
-
   const prompt = `あなたはプロの美容・化粧品専門家です。この画像の化粧品・美容品を詳しく分析してください。
 
 以下のJSON形式で回答してください（コードブロックなし、純粋なJSONのみ）:
@@ -61,7 +76,7 @@ export async function analyzeCosmetic(imageBase64: string, mimeType: string) {
 
 画像から読み取れない情報は外観・カテゴリーから推定してください。日本語で詳しく、丁寧に回答してください。`;
 
-  const result = await model.generateContent([
+  const text = await generateWithFallback(() => [
     {
       inlineData: {
         data: imageBase64,
@@ -71,7 +86,6 @@ export async function analyzeCosmetic(imageBase64: string, mimeType: string) {
     { text: prompt },
   ]);
 
-  const text = result.response.text();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Invalid response format");
   return JSON.parse(jsonMatch[0]);
@@ -83,8 +97,6 @@ export async function getRecommendations(
   useDatabase: boolean,
   dbProducts?: Record<string, unknown>[]
 ) {
-  const model = getModel();
-
   const prompt = useDatabase && dbProducts?.length
     ? `あなたはプロの美容コンサルタントです。お客様の肌データに基づいて最適な化粧品を推薦してください。
 
@@ -146,16 +158,13 @@ JSON形式で回答（コードブロックなし）:
   "expertNote": "専門家からのメモ"
 }`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const text = await generateWithFallback(() => prompt);
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Invalid response format");
   return JSON.parse(jsonMatch[0]);
 }
 
 export async function freeSearch(query: string) {
-  const model = getModel();
-
   const prompt = `あなたはプロの美容コンサルタントです。最新の美容・化粧品の知識を持ち、あらゆる美容に関する質問に詳しく答えます。
 
 以下の質問・検索に対して、プロの美容コンサルタントとして詳しく回答してください:
@@ -182,8 +191,7 @@ JSON形式で回答（コードブロックなし）:
   "expertAdvice": "専門家からのアドバイス（2-3文）"
 }`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const text = await generateWithFallback(() => prompt);
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Invalid response format");
   return JSON.parse(jsonMatch[0]);
