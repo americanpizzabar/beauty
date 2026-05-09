@@ -32,11 +32,11 @@ export default function SearchPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q }),
       });
-      if (!res.ok) throw new Error();
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "検索に失敗しました");
       setResult(data);
-    } catch {
-      setError("検索に失敗しました。もう一度お試しください。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "検索に失敗しました。もう一度お試しください。");
     } finally {
       setLoading(false);
     }

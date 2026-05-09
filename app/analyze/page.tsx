@@ -75,11 +75,11 @@ export default function AnalyzePage() {
       const formData = new FormData();
       formData.append("image", imageFile);
       const res = await fetch("/api/analyze", { method: "POST", body: formData });
-      if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "分析に失敗しました");
       setResult(data);
-    } catch {
-      setError("分析に失敗しました。もう一度お試しください。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "分析に失敗しました。もう一度お試しください。");
     } finally {
       setLoading(false);
     }
