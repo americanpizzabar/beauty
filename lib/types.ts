@@ -44,6 +44,7 @@ export interface Irritant {
 }
 
 export interface SkinProfile {
+  gender: string;
   skinType: string;
   concerns: string[];
   sensitivity: string;
@@ -72,6 +73,7 @@ export interface ProductRecommendation {
   howToUse: string;
   keyIngredients: string[];
   source: "database" | "internet";
+  purchaseUrl?: string;
 }
 
 export interface SearchResult {
@@ -79,4 +81,13 @@ export interface SearchResult {
   results: ProductRecommendation[];
   summary: string;
   expertAdvice: string;
+}
+
+export interface ProductStatusCheck {
+  id: string;
+  name: string;
+  brand: string;
+  status: "active" | "discontinued" | "updated" | "unknown";
+  statusNote: string;
+  newProductName?: string;
 }
