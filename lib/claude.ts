@@ -246,6 +246,56 @@ ${JSON.stringify(products, null, 2)}
   return JSON.parse(jsonMatch[0]);
 }
 
+// ── COLOREXPERT: カラー剤スキャン（画像） ───────────────
+export async function extractColorAgentFromImage(imageBase64: string, mimeType: string) {
+  const prompt = `あなたはプロのヘアカラーリストです。この写真に写っているカラー剤（ヘアカラー薬剤）の情報を抽出してください。
+
+JSON形式のみで回答してください（コードブロックなし）:
+{
+  "brand": "ブランド名（例：WELLA, MILBON, SHISEIDO PROFESSIONAL, Lebel, THROW）",
+  "series": "シリーズ名（例：イルミナカラー、アディクシーカラー、N.カラー）",
+  "name": "商品名・カラー名（例：LAVENDER, DEEP SMOKY, SMOKY BEIGE）",
+  "code": "カラーコード（例：6LA, 7V, 9OL など。不明なら空文字）",
+  "type": "base/control/oxi",
+  "level": 1から20の整数またはnull
+}
+
+typeの判断基準:
+- base: 1剤・メインカラー剤
+- control: コントロール剤・補色剤
+- oxi: 2剤・オキシ・過酸化水素水`;
+
+  const text = await generateWithFallback(() => [
+    { inlineData: { data: imageBase64, mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif" } },
+    { text: prompt },
+  ]);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── COLOREXPERT: カラー剤スキャン（URL） ────────────────
+export async function extractColorAgentFromUrl(url: string) {
+  const prompt = `あなたはプロのヘアカラーリストです。以下のURLの商品ページからカラー剤情報を抽出してください。
+
+URL: ${url}
+
+URLのドメイン・パス・パラメータから製品を特定し、JSON形式のみで回答してください（コードブロックなし）:
+{
+  "brand": "ブランド名",
+  "series": "シリーズ名",
+  "name": "商品名・カラー名",
+  "code": "カラーコード（例：6LA, 7V など。不明なら空文字）",
+  "type": "base/control/oxi",
+  "level": 1から20の整数またはnull
+}`;
+
+  const text = await generateWithFallback(() => prompt);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
 // ── COLOREXPERT: 髪質・色調解析 ─────────────────────────
 export async function analyzeHairFromImage(imageBase64: string, mimeType: string) {
   const prompt = `あなたはプロのヘアカラーリストです。この髪の写真を専門家の視点で詳しく分析してください。
