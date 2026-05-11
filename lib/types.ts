@@ -53,7 +53,7 @@ export interface SkinProfile {
   texture: string;
   allergies: string;
   currentRoutine: string;
-  priceRange: string;
+  priceRanges: string[];
 }
 
 export interface RecommendationResult {

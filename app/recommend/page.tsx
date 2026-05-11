@@ -54,7 +54,7 @@ export default function RecommendPage() {
     texture: "",
     allergies: "",
     currentRoutine: "",
-    priceRange: "",
+    priceRanges: [] as string[],
   });
 
   useEffect(() => {
@@ -298,18 +298,21 @@ export default function RecommendPage() {
 
           {/* Price range */}
           <div className="glass rounded-2xl p-5">
-            <label className="text-pearl text-xs font-semibold tracking-wider mb-3 block">希望価格帯</label>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              {PRICE_RANGES.map(r => (
-                <button key={r} onClick={() => setSkinProfile(p => ({ ...p, priceRange: p.priceRange === r ? "" : r }))}
-                  className={`py-2 px-2 rounded-xl text-xs font-medium transition-all ${skinProfile.priceRange === r ? "bg-gold/15 border border-gold/30 text-gold" : "glass border border-white/8 text-pearl-muted hover:text-pearl"}`}>
-                  {r}
-                </button>
-              ))}
-              <button onClick={() => setSkinProfile(p => ({ ...p, priceRange: "" }))}
-                className={`py-2 px-2 rounded-xl text-xs font-medium transition-all ${skinProfile.priceRange === "" ? "bg-gold/15 border border-gold/30 text-gold" : "glass border border-white/8 text-pearl-muted hover:text-pearl"}`}>
-                指定なし
-              </button>
+            <label className="text-pearl text-xs font-semibold tracking-wider mb-3 block">希望価格帯（複数選択可）</label>
+            <div className="flex flex-wrap gap-2">
+              {PRICE_RANGES.map(r => {
+                const active = skinProfile.priceRanges.includes(r);
+                return (
+                  <button key={r}
+                    onClick={() => setSkinProfile(p => ({
+                      ...p,
+                      priceRanges: active ? p.priceRanges.filter(x => x !== r) : [...p.priceRanges, r],
+                    }))}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-all ${active ? "bg-gold/10 border-gold/30 text-gold" : "border-white/10 text-pearl-muted hover:border-white/20"}`}>
+                    {r}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

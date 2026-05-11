@@ -98,13 +98,15 @@ export async function getRecommendations(
   useDatabase: boolean,
   dbProducts?: Record<string, unknown>[]
 ) {
-  const priceRange = skinProfile.priceRange ? `希望価格帯: ${skinProfile.priceRange}` : "";
+  const priceRanges = Array.isArray(skinProfile.priceRanges) && (skinProfile.priceRanges as string[]).length > 0
+    ? `希望価格帯: ${(skinProfile.priceRanges as string[]).join("、")}`
+    : "";
   const prompt = useDatabase && dbProducts?.length
     ? `あなたはプロの美容コンサルタントです。お客様の肌データに基づいて最適な化粧品を推薦してください。
 
 お客様のプロフィール:
 ${JSON.stringify(skinProfile, null, 2)}
-${priceRange}
+${priceRanges}
 
 お探しの商品: ${searchQuery}
 
@@ -136,7 +138,7 @@ JSON形式で回答（コードブロックなし）:
 
 お客様のプロフィール:
 ${JSON.stringify(skinProfile, null, 2)}
-${priceRange}
+${priceRanges}
 
 お探しの商品: ${searchQuery}
 
