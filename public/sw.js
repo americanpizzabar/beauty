@@ -1,9 +1,12 @@
-const CACHE_NAME = 'beaute-v1';
+const CACHE_NAME = 'beaute-v2';
 const STATIC_ASSETS = [
   '/',
   '/analyze',
   '/recommend',
   '/search',
+  '/products',
+  '/compare',
+  '/colorexpert',
 ];
 
 self.addEventListener('install', (event) => {
