@@ -115,3 +115,69 @@ export interface ComparisonResult {
   products: ComparedProduct[];
   recommendation: string;
 }
+
+// ── COLOREXPERT AI ─────────────────────────────────────────
+
+export interface HairZoneLevel {
+  level: number;
+  undertone: string;
+  damage: "healthy" | "mild" | "moderate" | "severe";
+  notes: string;
+}
+
+export interface HairAnalysis {
+  zones: {
+    roots: HairZoneLevel;
+    mid: HairZoneLevel;
+    tips: HairZoneLevel;
+  };
+  overallDamage: "healthy" | "mild" | "moderate" | "severe";
+  damageDetails: string;
+  undertoneAnalysis: { red: number; yellow: number; orange: number };
+  undertoneDescription: string;
+  cuticleCondition: string;
+  recommendedOxi: "3%" | "6%" | "AC";
+  porosity: "low" | "medium" | "high";
+  elasticity: "good" | "normal" | "poor";
+  notes: string;
+}
+
+export interface ColorTarget {
+  targetLevel: number;
+  hue: string;
+  saturation: "vivid" | "natural" | "muted";
+  toneFamily: string;
+  colorDescription: string;
+  baseColorNeeded: string;
+  processDifficulty: "easy" | "moderate" | "challenging";
+  notes: string;
+  textDescription?: string;
+}
+
+export interface RecipeAgent {
+  role: string;
+  name: string;
+  brand: string;
+  code: string;
+  amount: number;
+  unit: "g" | "%";
+}
+
+export interface RecipeStep {
+  stepNumber: number;
+  area: string;
+  agents: RecipeAgent[];
+  processingTime: number;
+  temperature: "room" | "warm" | "cool";
+  instructions: string;
+}
+
+export interface ColorRecipe {
+  steps: RecipeStep[];
+  totalTime: number;
+  totalAmount: number;
+  warnings: string[];
+  allergySafety: string;
+  aftercare: string;
+  notes: string;
+}

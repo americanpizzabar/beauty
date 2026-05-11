@@ -36,12 +36,25 @@ export interface CustomProduct {
   statusCheckedAt?: number;
 }
 
+export interface ColorInventoryItem {
+  id: string;
+  brand: string;
+  series: string;
+  name: string;
+  code: string;
+  type: "base" | "control" | "oxi";
+  stock: number;
+  expiresAt?: string;
+  addedAt: number;
+}
+
 // ── Keys ───────────────────────────────────────────────
 const K = {
   analysis: "beaute_analysis_history",
   recommend: "beaute_recommend_history",
   products: "beaute_custom_products",
   categories: "beaute_categories",
+  colorInventory: "beaute_color_inventory",
 };
 
 export const DEFAULT_CATEGORIES = [
@@ -141,4 +154,25 @@ export function getCategories(): string[] {
 
 export function saveCategories(categories: string[]): void {
   save(K.categories, categories);
+}
+
+// ── Color Inventory ────────────────────────────────────
+export function getColorInventory(): ColorInventoryItem[] {
+  return load<ColorInventoryItem[]>(K.colorInventory, []);
+}
+
+export function addColorInventoryItem(
+  item: Omit<ColorInventoryItem, "id" | "addedAt">
+): ColorInventoryItem {
+  const newItem: ColorInventoryItem = { ...item, id: uid(), addedAt: Date.now() };
+  save(K.colorInventory, [newItem, ...getColorInventory()]);
+  return newItem;
+}
+
+export function updateColorInventoryItem(id: string, updates: Partial<ColorInventoryItem>): void {
+  save(K.colorInventory, getColorInventory().map((i) => (i.id === id ? { ...i, ...updates } : i)));
+}
+
+export function deleteColorInventoryItem(id: string): void {
+  save(K.colorInventory, getColorInventory().filter((i) => i.id !== id));
 }

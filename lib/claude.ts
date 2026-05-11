@@ -246,6 +246,125 @@ ${JSON.stringify(products, null, 2)}
   return JSON.parse(jsonMatch[0]);
 }
 
+// ── COLOREXPERT: 髪質・色調解析 ─────────────────────────
+export async function analyzeHairFromImage(imageBase64: string, mimeType: string) {
+  const prompt = `あなたはプロのヘアカラーリストです。この髪の写真を専門家の視点で詳しく分析してください。
+
+レベルスケール: 1（黒）〜 6（ナチュラルブラウン）〜 10（ゴールド）〜 14（ペール）〜 20（ホワイト）
+
+JSON形式のみで回答してください（コードブロックなし）:
+{
+  "zones": {
+    "roots": { "level": 1から20の整数, "undertone": "赤み/黄み/オレンジみ等", "damage": "healthy/mild/moderate/severe", "notes": "根元の状態" },
+    "mid": { "level": 整数, "undertone": "...", "damage": "...", "notes": "中間の状態" },
+    "tips": { "level": 整数, "undertone": "...", "damage": "...", "notes": "毛先の状態" }
+  },
+  "overallDamage": "healthy/mild/moderate/severe",
+  "damageDetails": "ダメージの詳細説明（2-3文）",
+  "undertoneAnalysis": { "red": 0から100, "yellow": 0から100, "orange": 0から100 },
+  "undertoneDescription": "残留色素のアンダートーン説明",
+  "cuticleCondition": "キューティクルの状態",
+  "recommendedOxi": "3%または6%またはAC",
+  "porosity": "low/medium/high",
+  "elasticity": "good/normal/poor",
+  "notes": "プロとしての施術上の注意コメント"
+}`;
+
+  const text = await generateWithFallback(() => [
+    { inlineData: { data: imageBase64, mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif" } },
+    { text: prompt },
+  ]);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── COLOREXPERT: ターゲットカラー解析 ───────────────────
+export async function analyzeTargetColor(description?: string, imageBase64?: string, mimeType?: string) {
+  const descLine = description ? `目標の説明: ${description}\n` : "";
+  const prompt = `あなたはプロのヘアカラーリストです。${imageBase64 ? "この参考画像のヘアカラー" : "以下の目標カラーの説明"}を分析してください。\n${descLine}
+JSON形式のみで回答してください（コードブロックなし）:
+{
+  "targetLevel": 1から20,
+  "hue": "色相の説明",
+  "saturation": "vivid/natural/muted",
+  "toneFamily": "アッシュ/マット/ウォーム/ベージュ/ラベンダー/ピンク/シルバー等",
+  "colorDescription": "詳しい色の説明（2-3文）",
+  "baseColorNeeded": "実現に必要なベースカラーのレベル・条件",
+  "processDifficulty": "easy/moderate/challenging",
+  "notes": "達成のための重要ポイント"
+}`;
+
+  const text = imageBase64 && mimeType
+    ? await generateWithFallback(() => [
+        { inlineData: { data: imageBase64, mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif" } },
+        { text: prompt },
+      ])
+    : await generateWithFallback(() => prompt);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── COLOREXPERT: レシピ生成 ──────────────────────────────
+export async function generateColorRecipe(
+  hairAnalysis: Record<string, unknown>,
+  colorTarget: Record<string, unknown>,
+  inventory: Record<string, unknown>[],
+  hairLength: string,
+  hairDensity: string,
+  allergies: string
+) {
+  const inventorySection = inventory.length > 0
+    ? `利用可能な薬剤在庫:\n${JSON.stringify(inventory, null, 2)}`
+    : "在庫情報なし（一般的な薬剤を使用してください）";
+
+  const prompt = `あなたはプロのヘアカラーリストです。以下のデータから最適なカラーレシピを作成してください。
+
+【現在の髪の状態】
+${JSON.stringify(hairAnalysis, null, 2)}
+
+【目標カラー】
+${JSON.stringify(colorTarget, null, 2)}
+
+【${inventorySection}】
+
+【施術情報】
+髪の長さ: ${hairLength || "不明"}
+毛量: ${hairDensity || "不明"}
+アレルギー・禁忌: ${allergies || "なし"}
+
+在庫がある場合は在庫の薬剤を優先し、ない場合は一般的な薬剤名を使用してください。
+アレルギー情報がある場合は必ずwarningsに含め、危険な施術は強くブロックしてください。
+
+JSON形式のみで回答してください（コードブロックなし）:
+{
+  "steps": [
+    {
+      "stepNumber": 1,
+      "area": "全体/根元/中間/毛先",
+      "agents": [
+        { "role": "ベース/コントロール/オキシ", "name": "商品名", "brand": "ブランド", "code": "コード例:6LA", "amount": 数値, "unit": "g" }
+      ],
+      "processingTime": 分数（整数）,
+      "temperature": "room/warm/cool",
+      "instructions": "この工程の塗布手順と注意事項"
+    }
+  ],
+  "totalTime": 総放置時間（分・整数）,
+  "totalAmount": 総グラム数（整数）,
+  "warnings": ["注意事項1", "注意事項2"],
+  "allergySafety": "アレルギーに関する安全性コメント",
+  "aftercare": "施術後のホームケアアドバイス",
+  "notes": "プロとしての施術上の補足コメント"
+}`;
+
+  const text = await generateWithFallback(() => prompt);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
 // ── 商品ステータス確認 ──────────────────────────────────
 export async function checkProductsStatus(
   products: { id: string; name: string; brand: string; category: string }[]
