@@ -16,6 +16,7 @@ import { getAllProducts } from "@/lib/db";
 import type { CustomProduct } from "@/lib/storage";
 
 const SKIN_TYPES = ["乾燥肌", "脂性肌", "混合肌", "敏感肌", "普通肌", "ニキビ肌"];
+const PRICE_RANGES = ["〜¥1,000", "¥1,000〜¥3,000", "¥3,000〜¥5,000", "¥5,000〜¥10,000", "¥10,000〜"];
 const CONCERNS_LIST = [
   "乾燥・保湿", "毛穴・テカリ", "ニキビ・吹き出物", "シミ・くすみ",
   "美白・透明感", "シワ・たるみ", "ハリ・弾力", "敏感肌・赤み",
@@ -53,6 +54,7 @@ export default function RecommendPage() {
     texture: "",
     allergies: "",
     currentRoutine: "",
+    priceRange: "",
   });
 
   useEffect(() => {
@@ -291,6 +293,23 @@ export default function RecommendPage() {
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Price range */}
+          <div className="glass rounded-2xl p-5">
+            <label className="text-pearl text-xs font-semibold tracking-wider mb-3 block">希望価格帯</label>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {PRICE_RANGES.map(r => (
+                <button key={r} onClick={() => setSkinProfile(p => ({ ...p, priceRange: p.priceRange === r ? "" : r }))}
+                  className={`py-2 px-2 rounded-xl text-xs font-medium transition-all ${skinProfile.priceRange === r ? "bg-gold/15 border border-gold/30 text-gold" : "glass border border-white/8 text-pearl-muted hover:text-pearl"}`}>
+                  {r}
+                </button>
+              ))}
+              <button onClick={() => setSkinProfile(p => ({ ...p, priceRange: "" }))}
+                className={`py-2 px-2 rounded-xl text-xs font-medium transition-all ${skinProfile.priceRange === "" ? "bg-gold/15 border border-gold/30 text-gold" : "glass border border-white/8 text-pearl-muted hover:text-pearl"}`}>
+                指定なし
+              </button>
             </div>
           </div>
 

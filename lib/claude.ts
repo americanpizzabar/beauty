@@ -98,15 +98,17 @@ export async function getRecommendations(
   useDatabase: boolean,
   dbProducts?: Record<string, unknown>[]
 ) {
+  const priceRange = skinProfile.priceRange ? `希望価格帯: ${skinProfile.priceRange}` : "";
   const prompt = useDatabase && dbProducts?.length
     ? `あなたはプロの美容コンサルタントです。お客様の肌データに基づいて最適な化粧品を推薦してください。
 
 お客様のプロフィール:
 ${JSON.stringify(skinProfile, null, 2)}
+${priceRange}
 
 お探しの商品: ${searchQuery}
 
-以下のデータベース商品の中から最適なものを推薦してください:
+以下のデータベース商品の中から最適なものを推薦してください（希望価格帯がある場合は価格も考慮してください）:
 ${JSON.stringify(dbProducts, null, 2)}
 
 JSON形式で回答（コードブロックなし）:
@@ -134,10 +136,11 @@ JSON形式で回答（コードブロックなし）:
 
 お客様のプロフィール:
 ${JSON.stringify(skinProfile, null, 2)}
+${priceRange}
 
 お探しの商品: ${searchQuery}
 
-インターネット上の知識から最適な化粧品・美容品を5つ推薦してください。
+インターネット上の知識から最適な化粧品・美容品を5つ推薦してください（希望価格帯がある場合は価格も考慮してください）。
 
 JSON形式で回答（コードブロックなし）:
 {
@@ -195,6 +198,45 @@ JSON形式で回答（コードブロックなし）:
   "summary": "検索結果の総合まとめ（2-3文）",
   "expertAdvice": "専門家からのアドバイス（2-3文）"
 }`;
+
+  const text = await generateWithFallback(() => prompt);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── 商品比較 ────────────────────────────────────────────
+export async function compareProducts(products: Record<string, unknown>[]) {
+  const prompt = `あなたはプロの美容・化粧品専門家です。以下の${products.length}つの化粧品・美容品を詳しく比較分析してください。
+
+比較商品:
+${JSON.stringify(products, null, 2)}
+
+各商品の成分・効果・価格・適した肌タイプなどを踏まえて詳細に比較し、JSON形式で回答してください（コードブロックなし）:
+{
+  "comparison": "全商品の総合的な比較分析（3-4文）",
+  "winner": "総合的に最もおすすめの商品名（特定できない場合はnull）",
+  "products": [
+    {
+      "id": "商品ID",
+      "name": "商品名",
+      "brand": "ブランド",
+      "scores": {
+        "hydration": 0から100（保湿力）,
+        "brightening": 0から100（美白・透明感）,
+        "antiAging": 0から100（エイジングケア）,
+        "sensitivity": 0から100（敏感肌への優しさ）,
+        "valueForMoney": 0から100（コスパ）
+      },
+      "strengths": ["強み1", "強み2", "強み3"],
+      "weaknesses": ["弱み1", "弱み2"],
+      "bestFor": "どんな人に向いているか（1-2文）"
+    }
+  ],
+  "recommendation": "どのような人にどの商品をすすめるか、購入アドバイス（2-3文）"
+}
+
+比較商品リスト全${products.length}商品を必ずproductsに含めてください。`;
 
   const text = await generateWithFallback(() => prompt);
   const jsonMatch = text.match(/\{[\s\S]*\}/);

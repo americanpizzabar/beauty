@@ -53,6 +53,7 @@ export interface SkinProfile {
   texture: string;
   allergies: string;
   currentRoutine: string;
+  priceRange: string;
 }
 
 export interface RecommendationResult {
@@ -90,4 +91,27 @@ export interface ProductStatusCheck {
   status: "active" | "discontinued" | "updated" | "unknown";
   statusNote: string;
   newProductName?: string;
+}
+
+export interface ComparedProduct {
+  id: string;
+  name: string;
+  brand: string;
+  scores: {
+    hydration: number;
+    brightening: number;
+    antiAging: number;
+    sensitivity: number;
+    valueForMoney: number;
+  };
+  strengths: string[];
+  weaknesses: string[];
+  bestFor: string;
+}
+
+export interface ComparisonResult {
+  comparison: string;
+  winner?: string;
+  products: ComparedProduct[];
+  recommendation: string;
 }

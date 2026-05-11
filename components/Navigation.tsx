@@ -3,13 +3,14 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Camera, Sparkles, Search, Package, Menu, X } from "lucide-react";
+import { Camera, Sparkles, Search, Package, Scale, Menu, X } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/analyze", label: "製品分析", labelEn: "ANALYZE", icon: Camera },
   { href: "/recommend", label: "おすすめ", labelEn: "RECOMMEND", icon: Sparkles },
   { href: "/search", label: "フリー検索", labelEn: "SEARCH", icon: Search },
   { href: "/products", label: "商品DB", labelEn: "PRODUCTS", icon: Package },
+  { href: "/compare", label: "比較", labelEn: "COMPARE", icon: Scale },
 ];
 
 export default function Navigation() {
