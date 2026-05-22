@@ -179,7 +179,7 @@ export async function freeSearch(query: string) {
 以下の質問・検索に対して、プロの美容コンサルタントとして詳しく回答してください:
 「${query}」
 
-JSON形式で回答（コードブロックなし）:
+JSON形式で回答（コードブロックなし）。purchaseUrlは含めないこと:
 {
   "query": "入力されたクエリ",
   "results": [
@@ -190,15 +190,40 @@ JSON形式で回答（コードブロックなし）:
       "category": "カテゴリー",
       "price": "参考価格（該当する場合）",
       "matchScore": 85,
-      "reasons": ["理由1", "理由2"],
+      "reasons": ["理由1", "理由2", "理由3"],
       "howToUse": "使用方法（該当する場合）",
-      "keyIngredients": ["成分1", "成分2"],
-      "source": "internet",
-      "purchaseUrl": "公式サイトURL or 購入できるURLの推定"
+      "keyIngredients": ["成分1", "成分2", "成分3"],
+      "source": "internet"
     }
   ],
   "summary": "検索結果の総合まとめ（2-3文）",
   "expertAdvice": "専門家からのアドバイス（2-3文）"
+}`;
+
+  const text = await generateWithFallback(() => prompt);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Invalid response format");
+  return JSON.parse(jsonMatch[0]);
+}
+
+// ── 商品深掘り検索 ────────────────────────────────────
+export async function deepenProductSearch(
+  product: { name: string; brand: string; category: string; price?: string; keyIngredients?: string[] },
+  question: string
+) {
+  const prompt = `あなたはプロの美容コンサルタントです。以下の化粧品・美容品についての追加質問に詳しく答えてください。
+
+商品: ${product.brand} ${product.name}（${product.category}）
+価格: ${product.price || "不明"}
+主成分: ${product.keyIngredients?.join(", ") || "不明"}
+
+質問: 「${question}」
+
+JSON形式のみで回答（コードブロックなし）:
+{
+  "answer": "詳しい回答（3-5文）",
+  "tips": ["追加のアドバイスや注意点1", "追加のアドバイスや注意点2", "追加のアドバイスや注意点3"],
+  "relatedProducts": ["関連するおすすめ商品名1（あれば）", "関連するおすすめ商品名2（あれば）"]
 }`;
 
   const text = await generateWithFallback(() => prompt);
