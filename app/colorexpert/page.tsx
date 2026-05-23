@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Palette, Camera, Upload, Zap, Clock, AlertTriangle,
   Package, Plus, Trash2, ChevronDown, ArrowRight, CheckCircle, Link2,
+  Pipette, SlidersHorizontal,
 } from "lucide-react";
 import PageWrapper from "@/components/PageWrapper";
 import {
@@ -16,7 +17,6 @@ import type { HairAnalysis, ColorTarget, ColorRecipe } from "@/lib/types";
 // Color computation utilities
 // ─────────────────────────────────────────────────────────
 
-// Natural hair base RGB values for levels 1–20
 const HAIR_BASES: [number, number, number][] = [
   [15, 10, 5],   [25, 15, 8],   [38, 22, 10],  [55, 32, 15],  [78, 46, 22],
   [102, 62, 30], [125, 78, 40], [152, 100, 52], [180, 125, 65],[208, 155, 82],
@@ -25,7 +25,7 @@ const HAIR_BASES: [number, number, number][] = [
 ];
 
 const TONE_TARGETS: Record<string, [number, number, number]> = {
-  "ナチュラル":  [0,   0,   0],   // unused – keeps base
+  "ナチュラル":  [0,   0,   0],
   "アッシュ":   [112, 128, 134],
   "マット":     [85,  90,  65],
   "ウォーム":   [200, 120, 40],
@@ -62,6 +62,186 @@ function shadeHex(hex: string, amount: number): string {
 }
 
 // ─────────────────────────────────────────────────────────
+// HSL / RGB utilities
+// ─────────────────────────────────────────────────────────
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  switch (max) {
+    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+    case g: h = ((b - r) / d + 2) / 6; break;
+    case b: h = ((r - g) / d + 4) / 6; break;
+  }
+  return [h * 360, s, l];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const h1 = h / 360;
+  const hue2rgb = (p: number, q: number, t: number) => {
+    const tt = ((t % 1) + 1) % 1;
+    if (tt < 1/6) return p + (q - p) * 6 * tt;
+    if (tt < 1/2) return q;
+    if (tt < 2/3) return p + (q - p) * (2/3 - tt) * 6;
+    return p;
+  };
+  if (s === 0) return [Math.round(l * 255), Math.round(l * 255), Math.round(l * 255)];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    Math.round(hue2rgb(p, q, h1 + 1/3) * 255),
+    Math.round(hue2rgb(p, q, h1) * 255),
+    Math.round(hue2rgb(p, q, h1 - 1/3) * 255),
+  ];
+}
+
+function hexToHsl(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return rgbToHsl(r, g, b);
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const [r, g, b] = hslToRgb(h, s, l);
+  return `#${[r, g, b].map(v => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexToPickerState(hex: string): { level: number; tone: string; sat: "vivid" | "natural" | "muted" } {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const [h, s, l] = rgbToHsl(r, g, b);
+  const level = Math.min(20, Math.max(1, Math.round(1 + l * 19)));
+  let tone = "ナチュラル";
+  if (s < 0.08) {
+    tone = l > 0.65 ? "シルバー" : "ナチュラル";
+  } else if (h >= 330 || h < 20) {
+    tone = "ピンク";
+  } else if (h >= 20 && h < 55) {
+    tone = "ウォーム";
+  } else if (h >= 55 && h < 95) {
+    tone = "ベージュ";
+  } else if (h >= 95 && h < 160) {
+    tone = "マット";
+  } else if (h >= 160 && h < 265) {
+    tone = "アッシュ";
+  } else if (h >= 265 && h < 295) {
+    tone = "ラベンダー";
+  } else if (h >= 295 && h < 330) {
+    tone = "ピンク";
+  }
+  const sat: "vivid" | "natural" | "muted" = s > 0.5 ? "vivid" : s < 0.18 ? "muted" : "natural";
+  return { level, tone, sat };
+}
+
+// ─────────────────────────────────────────────────────────
+// Canvas utilities
+// ─────────────────────────────────────────────────────────
+
+function applyAdjustmentsToCanvas(
+  canvas: HTMLCanvasElement,
+  brightness: number,
+  contrast: number,
+  temperature: number,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imageData.data;
+  const cf = contrast === 0 ? 1 : (259 * (contrast + 255)) / (255 * (259 - contrast));
+  for (let i = 0; i < d.length; i += 4) {
+    let rv = d[i] + brightness * 2.5;
+    let gv = d[i + 1] + brightness * 2.5;
+    let bv = d[i + 2] + brightness * 2.5;
+    rv = cf * (rv - 128) + 128;
+    gv = cf * (gv - 128) + 128;
+    bv = cf * (bv - 128) + 128;
+    rv += temperature * 1.5;
+    bv -= temperature * 1.5;
+    d[i]   = Math.min(255, Math.max(0, Math.round(rv)));
+    d[i+1] = Math.min(255, Math.max(0, Math.round(gv)));
+    d[i+2] = Math.min(255, Math.max(0, Math.round(bv)));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+async function createAdjustedImageBlob(
+  imageUrl: string,
+  brightness: number,
+  contrast: number,
+  temperature: number,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1200;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      applyAdjustmentsToCanvas(canvas, brightness, contrast, temperature);
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error("toBlob failed")),
+        "image/jpeg", 0.85,
+      );
+    };
+    img.onerror = () => reject(new Error("Image load failed"));
+    img.src = imageUrl;
+  });
+}
+
+function recolorHairOnCanvas(canvas: HTMLCanvasElement, targetHex: string, strength: number): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imageData.data;
+  const [tH, tS] = hexToHsl(targetHex);
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i+1], b = d[i+2];
+    const [, , l] = rgbToHsl(r, g, b);
+    if (l < 0.05 || l > 0.88) continue;
+    const newS = Math.min(1, tS * 0.8 + (1 - l) * 0.2);
+    const [nr, ng, nb] = hslToRgb(tH, newS, l);
+    d[i]   = Math.round(nr * strength + r * (1 - strength));
+    d[i+1] = Math.round(ng * strength + g * (1 - strength));
+    d[i+2] = Math.round(nb * strength + b * (1 - strength));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// ─────────────────────────────────────────────────────────
+// Popular hair colors gallery data
+// ─────────────────────────────────────────────────────────
+
+const POPULAR_COLORS = [
+  { name: "ミルクティーベージュ", hex: "#C5A882" },
+  { name: "シアーラベンダー",     hex: "#A894C8" },
+  { name: "スモーキーアッシュ",   hex: "#8A9099" },
+  { name: "ウォームキャラメル",   hex: "#B87E42" },
+  { name: "ホワイトシルバー",     hex: "#DCDCE2" },
+  { name: "ローズベージュ",       hex: "#C8947C" },
+  { name: "ブルーブラック",       hex: "#1A1823" },
+  { name: "サクラピンク",         hex: "#E8A0A8" },
+  { name: "マットオリーブ",       hex: "#8C8860" },
+  { name: "ナチュラルブラウン",   hex: "#8B5E3C" },
+  { name: "プラチナムブロンド",   hex: "#F0E5C0" },
+  { name: "コーラルオレンジ",     hex: "#D4825A" },
+  { name: "ネイビーアッシュ",     hex: "#5A6080" },
+  { name: "ダークチョコ",         hex: "#3D2010" },
+  { name: "グリーンアッシュ",     hex: "#7A9080" },
+  { name: "ライラック",           hex: "#C4A8D8" },
+];
+
+// ─────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────
 
@@ -73,10 +253,8 @@ function HairColorPreview({ color, level, tone }: { color: string; level: number
       <div className="absolute inset-0" style={{
         background: `linear-gradient(to bottom, ${root} 0%, ${color} 38%, ${color} 72%, ${tip} 100%)`,
       }} />
-      {/* shine */}
       <div className="absolute inset-0"
         style={{ background: "linear-gradient(108deg, rgba(255,255,255,0.18) 0%, transparent 55%)" }} />
-      {/* label */}
       <div className="absolute bottom-0 inset-x-0 px-2 py-1.5 bg-gradient-to-t from-black/50 to-transparent">
         <p className="text-white text-[9px] font-bold leading-tight">Lv.{level}</p>
         <p className="text-white/70 text-[8px] leading-tight">{tone}</p>
@@ -90,17 +268,296 @@ function LevelSlider({ value, onChange }: { value: number; onChange: (v: number)
   const pct = ((value - 1) / 19) * 100;
   return (
     <div className="relative h-8 flex items-center">
-      {/* gradient track */}
       <div className="absolute inset-x-0 h-3 rounded-full pointer-events-none"
         style={{ background: `linear-gradient(to right, ${stops.join(", ")})` }} />
-      {/* invisible range input */}
       <input type="range" min={1} max={20} value={value}
         onChange={e => onChange(Number(e.target.value))}
         className="absolute inset-x-0 w-full opacity-0 cursor-pointer h-3"
       />
-      {/* custom thumb */}
       <div className="absolute w-6 h-6 rounded-full border-2 border-white shadow-lg pointer-events-none transition-all duration-75"
         style={{ left: `calc(${pct}% - 12px)`, background: computeHairColor(value, "ナチュラル", "natural") }} />
+    </div>
+  );
+}
+
+function ColorWheelPicker({
+  hue, sat, lig, onChange,
+}: {
+  hue: number; sat: number; lig: number;
+  onChange: (h: number, s: number, l: number) => void;
+}) {
+  const RING_SIZE = 180;
+  const RING_WIDTH = 28;
+  const RING_R = RING_SIZE / 2 - RING_WIDTH / 2;
+
+  const getHue = (e: React.PointerEvent, el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left - RING_SIZE / 2;
+    const y = e.clientY - rect.top - RING_SIZE / 2;
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  };
+
+  const getSL = (e: React.PointerEvent, el: HTMLElement): [number, number] => {
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    return [x, 0.92 - y * 0.87];
+  };
+
+  const thumbAngle = (hue * Math.PI) / 180;
+  const thumbX = RING_SIZE / 2 + RING_R * Math.cos(thumbAngle);
+  const thumbY = RING_SIZE / 2 + RING_R * Math.sin(thumbAngle);
+  const padX = sat * 100;
+  const padY = Math.max(0, Math.min(100, ((0.92 - lig) / 0.87) * 100));
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      {/* Hue ring */}
+      <div
+        className="relative flex-shrink-0 select-none"
+        style={{ width: RING_SIZE, height: RING_SIZE, touchAction: "none", cursor: "crosshair" }}
+        onPointerDown={e => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          onChange(getHue(e, e.currentTarget), sat, lig);
+        }}
+        onPointerMove={e => { if (e.buttons > 0) onChange(getHue(e, e.currentTarget), sat, lig); }}
+      >
+        <div className="absolute inset-0 rounded-full pointer-events-none" style={{
+          background: "conic-gradient(hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%))",
+        }}/>
+        <div className="absolute rounded-full pointer-events-none flex items-center justify-center" style={{
+          inset: RING_WIDTH, background: "#0f0e13",
+        }}>
+          <div className="rounded-full border-2 border-white/20 flex-shrink-0"
+            style={{ width: 52, height: 52, background: hslToHex(hue, sat, lig) }}/>
+        </div>
+        <div className="absolute rounded-full border-2 border-white shadow-lg pointer-events-none" style={{
+          width: 20, height: 20,
+          left: thumbX - 10, top: thumbY - 10,
+          background: `hsl(${hue}deg, 100%, 50%)`,
+        }}/>
+      </div>
+
+      {/* SL pad */}
+      <div
+        className="relative w-full rounded-xl select-none overflow-hidden"
+        style={{ height: 110, touchAction: "none", cursor: "crosshair" }}
+        onPointerDown={e => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          const [s, l] = getSL(e, e.currentTarget);
+          onChange(hue, s, l);
+        }}
+        onPointerMove={e => {
+          if (e.buttons > 0) {
+            const [s, l] = getSL(e, e.currentTarget);
+            onChange(hue, s, l);
+          }
+        }}
+      >
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: `linear-gradient(to right, #ffffff, hsl(${hue}deg, 100%, 50%))`,
+        }}/>
+        <div className="absolute inset-0 pointer-events-none" style={{
+          background: "linear-gradient(to bottom, transparent, #000000)",
+        }}/>
+        <div className="absolute rounded-full border-2 border-white shadow-md pointer-events-none"
+          style={{
+            width: 16, height: 16,
+            left: `calc(${padX}% - 8px)`,
+            top: `calc(${padY}% - 8px)`,
+            background: hslToHex(hue, sat, lig),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function HexInputPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+  const [raw, setRaw] = useState(value);
+  useEffect(() => { setRaw(value); }, [value]);
+
+  const handleChange = (v: string) => {
+    const normalized = v.startsWith("#") ? v : "#" + v;
+    setRaw(normalized.toUpperCase());
+    if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+      onChange(normalized.toLowerCase());
+    }
+  };
+
+  const isValid = /^#[0-9a-fA-F]{6}$/i.test(raw);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-xl border-2 border-white/20 flex-shrink-0"
+          style={{ background: isValid ? raw : "#888" }}/>
+        <div className="flex-1">
+          <p className="text-pearl-dim text-[10px] mb-1">HEXカラーコード</p>
+          <input
+            type="text"
+            value={raw}
+            onChange={e => handleChange(e.target.value)}
+            maxLength={7}
+            placeholder="#C5A882"
+            className={`w-full px-3 py-2 rounded-xl text-sm font-mono border ${isValid ? "border-emerald-500/40" : "border-red-500/30"}`}
+          />
+        </div>
+      </div>
+      <p className="text-pearl-dim/50 text-[10px]">例: #C5A882 · #A894C8 · #8A9099</p>
+    </div>
+  );
+}
+
+function HairColorGallery({ onSelect }: { onSelect: (hex: string) => void }) {
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {POPULAR_COLORS.map(({ name, hex }) => (
+        <button key={hex} onClick={() => onSelect(hex)}
+          className="flex flex-col items-center gap-1.5 p-2 glass rounded-xl border border-white/5 hover:border-gold/20 transition-all group">
+          <div className="w-10 h-10 rounded-full border-2 border-white/15 group-hover:border-white/30 transition-all"
+            style={{ background: hex }}/>
+          <p className="text-[8px] text-pearl-dim/70 text-center leading-tight line-clamp-2">{name}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EyedropperPicker({
+  defaultDataUrl,
+  onColorPick,
+}: {
+  defaultDataUrl: string | null;
+  onColorPick: (hex: string) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const eyeFileRef = useRef<HTMLInputElement>(null);
+  const [dataUrl, setDataUrl] = useState<string | null>(defaultDataUrl);
+  const [pickedHex, setPickedHex] = useState<string | null>(null);
+
+  useEffect(() => { setDataUrl(defaultDataUrl); }, [defaultDataUrl]);
+
+  useEffect(() => {
+    if (!dataUrl || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 320;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    };
+    img.src = dataUrl;
+  }, [dataUrl]);
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    const [r, g, b] = canvas.getContext("2d")!.getImageData(x, y, 1, 1).data;
+    const hex = `#${[r, g, b].map(v => v.toString(16).padStart(2, "0")).join("")}`;
+    setPickedHex(hex);
+    onColorPick(hex);
+  };
+
+  return (
+    <div className="space-y-3">
+      {dataUrl ? (
+        <div className="space-y-2">
+          <canvas ref={canvasRef} className="w-full rounded-xl cursor-crosshair" onClick={handleClick}/>
+          <p className="text-pearl-dim/60 text-[10px] text-center">画像をタップして色を取得</p>
+          {pickedHex && (
+            <div className="flex items-center gap-2 glass rounded-xl px-3 py-2">
+              <div className="w-5 h-5 rounded-full border border-white/20 flex-shrink-0"
+                style={{ background: pickedHex }}/>
+              <span className="text-pearl text-xs font-mono">{pickedHex.toUpperCase()}</span>
+              <span className="text-emerald-400 text-[10px] ml-auto">取得済み</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="border-2 border-dashed border-white/10 rounded-xl p-6 flex flex-col items-center gap-2">
+          <Pipette size={24} className="text-pearl-dim/30"/>
+          <p className="text-pearl-dim text-xs text-center">参考画像をアップロードして<br/>ピクセルの色を取得</p>
+        </div>
+      )}
+      <input ref={eyeFileRef} type="file" accept="image/*" className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = ev => setDataUrl(ev.target?.result as string);
+          reader.readAsDataURL(file);
+        }}
+      />
+      <button onClick={() => eyeFileRef.current?.click()}
+        className="w-full flex items-center justify-center gap-2 py-2.5 glass border border-white/10 rounded-xl text-sm text-pearl-muted hover:text-pearl transition-colors">
+        <Upload size={14}/> 参考画像をアップロード
+      </button>
+    </div>
+  );
+}
+
+function PhotoAdjustPanel({
+  brightness, setBrightness,
+  contrast, setContrast,
+  temperature, setTemperature,
+  onAutoWB,
+}: {
+  brightness: number; setBrightness: (v: number) => void;
+  contrast: number; setContrast: (v: number) => void;
+  temperature: number; setTemperature: (v: number) => void;
+  onAutoWB: () => void;
+}) {
+  const hasAdjustment = brightness !== 0 || contrast !== 0 || temperature !== 0;
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-pearl text-xs font-semibold tracking-wider">ライティング調整</p>
+        <div className="flex items-center gap-2">
+          {hasAdjustment && (
+            <button onClick={() => { setBrightness(0); setContrast(0); setTemperature(0); }}
+              className="text-[10px] text-pearl-dim/50 hover:text-pearl-dim transition-colors">
+              リセット
+            </button>
+          )}
+          <button onClick={onAutoWB}
+            className="text-[10px] px-3 py-1 glass border border-gold/20 text-gold rounded-full hover:bg-gold/10 transition-all">
+            オートWB
+          </button>
+        </div>
+      </div>
+      {([
+        { label: "明るさ", value: brightness, set: setBrightness },
+        { label: "コントラスト", value: contrast, set: setContrast },
+      ] as { label: string; value: number; set: (v: number) => void }[]).map(({ label, value, set }) => (
+        <div key={label}>
+          <div className="flex justify-between text-[10px] mb-1.5">
+            <span className="text-pearl-dim">{label}</span>
+            <span className="text-pearl font-mono">{value > 0 ? "+" : ""}{value}</span>
+          </div>
+          <input type="range" min={-50} max={50} value={value}
+            onChange={e => set(Number(e.target.value))}
+            className="w-full h-1 rounded-full accent-gold cursor-pointer"/>
+        </div>
+      ))}
+      <div>
+        <div className="flex justify-between text-[10px] mb-1.5">
+          <span className="text-pearl-dim">色温度</span>
+          <span className="text-pearl font-mono">{temperature > 0 ? "+" : ""}{temperature}</span>
+        </div>
+        <input type="range" min={-50} max={50} value={temperature}
+          onChange={e => setTemperature(Number(e.target.value))}
+          className="w-full h-1 rounded-full accent-gold cursor-pointer"/>
+        <div className="flex justify-between text-[9px] text-pearl-dim/40 mt-0.5">
+          <span>寒色</span><span>暖色</span>
+        </div>
+      </div>
+      {hasAdjustment && (
+        <p className="text-gold/60 text-[10px] text-center">✦ 補正後の画像をAIに送信します</p>
+      )}
     </div>
   );
 }
@@ -136,24 +593,36 @@ const BLANK_ITEM = { brand:"", series:"", name:"", code:"", type:"base" as Color
 type Tab        = "analyze" | "recipe" | "inventory";
 type TargetMode = "picker" | "image" | "text";
 type AddMode    = "manual" | "scan" | "url";
+type PickerInput = "sliders" | "wheel" | "hex" | "gallery" | "eyedropper";
 
 export default function ColorExpertPage() {
   const [tab, setTab] = useState<Tab>("analyze");
 
   // ── Analyze ────────────────────────────────────────────
-  const [hairImageUrl,  setHairImageUrl]  = useState<string | null>(null);
-  const [hairImageFile, setHairImageFile] = useState<File | null>(null);
-  const [hairAnalysis,  setHairAnalysis]  = useState<HairAnalysis | null>(null);
-  const [analyzeLoading, setAnalyzeLoading] = useState(false);
-  const [analyzeError,   setAnalyzeError]   = useState<string | null>(null);
+  const [hairImageUrl,     setHairImageUrl]     = useState<string | null>(null);
+  const [hairImageFile,    setHairImageFile]    = useState<File | null>(null);
+  const [hairImageDataUrl, setHairImageDataUrl] = useState<string | null>(null);
+  const [hairAnalysis,     setHairAnalysis]     = useState<HairAnalysis | null>(null);
+  const [analyzeLoading,   setAnalyzeLoading]   = useState(false);
+  const [analyzeError,     setAnalyzeError]     = useState<string | null>(null);
   const hairCameraRef = useRef<HTMLInputElement>(null);
   const hairFileRef   = useRef<HTMLInputElement>(null);
+
+  // ── Lighting adjustment ────────────────────────────────
+  const [brightness,   setBrightness]   = useState(0);
+  const [contrast,     setContrast]     = useState(0);
+  const [temperature,  setTemperature]  = useState(0);
 
   // ── Recipe / target ────────────────────────────────────
   const [targetMode,      setTargetMode]      = useState<TargetMode>("picker");
   const [pickerLevel,     setPickerLevel]     = useState(10);
   const [pickerTone,      setPickerTone]      = useState("ナチュラル");
   const [pickerSat,       setPickerSat]       = useState<"vivid"|"natural"|"muted">("natural");
+  const [pickerInput,     setPickerInput]     = useState<PickerInput>("sliders");
+  const [wheelH,          setWheelH]          = useState(30);
+  const [wheelS,          setWheelS]          = useState(0.35);
+  const [wheelL,          setWheelL]          = useState(0.5);
+  const [hexInputVal,     setHexInputVal]     = useState("#C8987C");
   const [targetImageUrl,  setTargetImageUrl]  = useState<string | null>(null);
   const [targetImageFile, setTargetImageFile] = useState<File | null>(null);
   const [targetDescription, setTargetDescription] = useState("");
@@ -166,6 +635,12 @@ export default function ColorExpertPage() {
   const [recipeLoading,   setRecipeLoading]   = useState(false);
   const [recipeError,     setRecipeError]     = useState<string | null>(null);
   const targetFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Recolor preview ────────────────────────────────────
+  const [recolorStrength, setRecolorStrength] = useState(0.65);
+  const [showAfter,       setShowAfter]       = useState(true);
+  const recolorCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const recolorTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Inventory ──────────────────────────────────────────
   const [inventory,      setInventory]      = useState<ColorInventoryItem[]>([]);
@@ -185,19 +660,109 @@ export default function ColorExpertPage() {
   // ── Computed preview color ─────────────────────────────
   const previewColor = computeHairColor(pickerLevel, pickerTone, pickerSat);
 
+  // Sync hex display and wheel when picker mode switches
+  const prevPickerInput = useRef<PickerInput>("sliders");
+  useEffect(() => {
+    if (prevPickerInput.current !== pickerInput) {
+      if (pickerInput === "wheel") {
+        const [h, s, l] = hexToHsl(previewColor);
+        setWheelH(h); setWheelS(s); setWheelL(l);
+      }
+      if (pickerInput === "hex") {
+        setHexInputVal(previewColor.toUpperCase());
+      }
+    }
+    prevPickerInput.current = pickerInput;
+  }, [pickerInput, previewColor]);
+
+  // Recolor canvas effect
+  useEffect(() => {
+    if (!hairImageDataUrl || !recolorCanvasRef.current) return;
+    if (recolorTimerRef.current) clearTimeout(recolorTimerRef.current);
+    recolorTimerRef.current = setTimeout(() => {
+      const canvas = recolorCanvasRef.current;
+      if (!canvas) return;
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 380;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        if (showAfter) recolorHairOnCanvas(canvas, previewColor, recolorStrength);
+      };
+      img.src = hairImageDataUrl;
+    }, 100);
+  }, [hairImageDataUrl, previewColor, recolorStrength, showAfter]);
+
+  useEffect(() => () => { if (recolorTimerRef.current) clearTimeout(recolorTimerRef.current); }, []);
+
+  // ── Sync from hex (gallery / hex input / eyedropper) ──
+  const syncFromHex = useCallback((hex: string) => {
+    const { level, tone, sat } = hexToPickerState(hex);
+    setPickerLevel(level);
+    setPickerTone(tone);
+    setPickerSat(sat);
+    const [h, s, l] = hexToHsl(hex);
+    setWheelH(h); setWheelS(s); setWheelL(l);
+    setHexInputVal(hex.toUpperCase());
+  }, []);
+
   // ── Handlers: analyze ──────────────────────────────────
   const handleHairFile = useCallback((file: File) => {
     setHairImageFile(file);
     setHairImageUrl(URL.createObjectURL(file));
+    setHairImageDataUrl(null);
     setHairAnalysis(null);
     setAnalyzeError(null);
+    setBrightness(0); setContrast(0); setTemperature(0);
+    const reader = new FileReader();
+    reader.onload = e => setHairImageDataUrl(e.target?.result as string);
+    reader.readAsDataURL(file);
   }, []);
+
+  const clearHairImage = () => {
+    setHairImageUrl(null);
+    setHairImageFile(null);
+    setHairImageDataUrl(null);
+    setHairAnalysis(null);
+    setBrightness(0); setContrast(0); setTemperature(0);
+  };
+
+  const handleAutoWB = useCallback(async () => {
+    if (!hairImageUrl) return;
+    const img = new Image();
+    img.src = hairImageUrl;
+    await new Promise<void>(r => { img.onload = () => r(); });
+    const MAX = 150;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width  = Math.round(img.width  * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let tR = 0, tG = 0, tB = 0;
+    const n = canvas.width * canvas.height;
+    for (let i = 0; i < data.length; i += 4) { tR += data[i]; tG += data[i+1]; tB += data[i+2]; }
+    const aR = tR/n, aG = tG/n, aB = tB/n;
+    const aL = 0.299*aR + 0.587*aG + 0.114*aB;
+    setBrightness(Math.min(50, Math.max(-50, Math.round((145 - aL) * 0.25))));
+    setTemperature(Math.min(50, Math.max(-50, Math.round((aB - aR) * 0.4))));
+    setContrast(0);
+  }, [hairImageUrl]);
 
   const analyzeHair = async () => {
     if (!hairImageFile) { setAnalyzeError("髪の写真を選択してください"); return; }
     setAnalyzeError(null); setAnalyzeLoading(true);
     try {
-      const fd = new FormData(); fd.append("image", hairImageFile);
+      let imageBlob: Blob = hairImageFile;
+      if ((brightness !== 0 || contrast !== 0 || temperature !== 0) && hairImageUrl) {
+        imageBlob = await createAdjustedImageBlob(hairImageUrl, brightness, contrast, temperature);
+      }
+      const fd = new FormData();
+      fd.append("image", imageBlob, hairImageFile.name);
       const res = await fetch("/api/colorexpert/analyze", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -331,6 +896,9 @@ export default function ColorExpertPage() {
     setInventory(getColorInventory());
   };
 
+  // CSS filter for live photo preview
+  const hairImgFilter = `brightness(${(1 + brightness / 100).toFixed(2)}) contrast(${(1 + contrast / 100).toFixed(2)}) sepia(${(Math.max(0, temperature) * 0.005).toFixed(3)}) hue-rotate(${(-temperature * 0.2).toFixed(1)}deg)`;
+
   // ─────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────
@@ -367,8 +935,9 @@ export default function ColorExpertPage() {
             {hairImageUrl ? (
               <div className="relative rounded-xl overflow-hidden mb-4">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={hairImageUrl} alt="Hair" className="w-full max-h-64 object-cover" />
-                <button onClick={() => { setHairImageUrl(null); setHairImageFile(null); setHairAnalysis(null); }}
+                <img src={hairImageUrl} alt="Hair" className="w-full max-h-64 object-cover"
+                  style={{ filter: hairImgFilter }}/>
+                <button onClick={clearHairImage}
                   className="absolute top-2 right-2 glass rounded-full p-1.5 text-pearl-muted hover:text-red-400 transition-colors">
                   <Trash2 size={12} />
                 </button>
@@ -395,6 +964,16 @@ export default function ColorExpertPage() {
               ✦ 自然光またはサロンライトで撮影すると精度が向上します
             </p>
           </div>
+
+          {/* Lighting adjustment panel */}
+          {hairImageUrl && (
+            <PhotoAdjustPanel
+              brightness={brightness} setBrightness={setBrightness}
+              contrast={contrast} setContrast={setContrast}
+              temperature={temperature} setTemperature={setTemperature}
+              onAutoWB={handleAutoWB}
+            />
+          )}
 
           {analyzeError && <div className="glass border border-red-500/20 rounded-xl px-4 py-3"><p className="text-red-400 text-sm">{analyzeError}</p></div>}
 
@@ -528,7 +1107,6 @@ export default function ColorExpertPage() {
           <div className="glass rounded-2xl overflow-hidden">
             <div className="px-5 pt-5 pb-3">
               <p className="text-pearl text-xs font-semibold tracking-wider mb-3">目標カラー設定</p>
-              {/* Mode tabs */}
               <div className="flex gap-1 bg-white/5 rounded-xl p-1">
                 {([
                   {key:"picker" as TargetMode, label:"🎨 ビジュアル"},
@@ -546,75 +1124,154 @@ export default function ColorExpertPage() {
             {/* ── Visual picker mode ── */}
             {targetMode === "picker" && (
               <div className="px-5 pb-5 space-y-4">
-                <div className="flex gap-4">
-                  {/* Hair preview */}
-                  <HairColorPreview color={previewColor} level={pickerLevel} tone={pickerTone}/>
-                  {/* Controls */}
-                  <div className="flex-1 space-y-4 min-w-0">
-                    {/* Level slider */}
-                    <div>
-                      <div className="flex justify-between text-xs mb-2">
-                        <span className="text-pearl-dim">明度レベル</span>
-                        <span className="text-gold font-bold">{pickerLevel}</span>
+                {/* Picker input sub-tabs */}
+                <div className="flex gap-1 bg-white/5 rounded-xl p-1 overflow-x-auto">
+                  {([
+                    { k: "sliders"    as PickerInput, icon: <SlidersHorizontal size={11}/>, label: "スライダー" },
+                    { k: "wheel"      as PickerInput, icon: <Palette size={11}/>,           label: "ホイール"   },
+                    { k: "hex"        as PickerInput, icon: <span className="text-[10px] font-mono">#</span>, label: "HEX" },
+                    { k: "gallery"    as PickerInput, icon: <span className="text-[10px]">★</span>,           label: "ギャラリー" },
+                    { k: "eyedropper" as PickerInput, icon: <Pipette size={11}/>,           label: "スポイト"   },
+                  ]).map(({ k, icon, label }) => (
+                    <button key={k} onClick={() => setPickerInput(k)}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-all whitespace-nowrap flex-shrink-0 ${pickerInput===k?"bg-gold/10 text-gold border border-gold/20":"text-pearl-muted hover:text-pearl"}`}>
+                      {icon}{label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Sliders mode */}
+                {pickerInput === "sliders" && (
+                  <div className="flex gap-4">
+                    <HairColorPreview color={previewColor} level={pickerLevel} tone={pickerTone}/>
+                    <div className="flex-1 space-y-4 min-w-0">
+                      <div>
+                        <div className="flex justify-between text-xs mb-2">
+                          <span className="text-pearl-dim">明度レベル</span>
+                          <span className="text-gold font-bold">{pickerLevel}</span>
+                        </div>
+                        <LevelSlider value={pickerLevel} onChange={setPickerLevel}/>
+                        <div className="flex justify-between text-[9px] text-pearl-dim/50 mt-1">
+                          <span>黒 (1)</span><span>白 (20)</span>
+                        </div>
                       </div>
-                      <LevelSlider value={pickerLevel} onChange={setPickerLevel}/>
-                      <div className="flex justify-between text-[9px] text-pearl-dim/50 mt-1">
-                        <span>黒 (1)</span><span>白 (20)</span>
+                      <div>
+                        <p className="text-pearl-dim text-[10px] mb-1.5">彩度</p>
+                        <div className="flex gap-1">
+                          {([
+                            {v:"vivid"   as const, label:"ビビッド"},
+                            {v:"natural" as const, label:"ナチュラル"},
+                            {v:"muted"   as const, label:"ミュート"},
+                          ]).map(({v,label}) => (
+                            <button key={v} onClick={()=>setPickerSat(v)}
+                              className={`flex-1 py-1 rounded-lg text-[10px] font-medium transition-all ${pickerSat===v?"bg-gold/10 border border-gold/20 text-gold":"glass border border-white/8 text-pearl-muted"}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                    {/* Saturation */}
-                    <div>
-                      <p className="text-pearl-dim text-[10px] mb-1.5">彩度</p>
-                      <div className="flex gap-1">
-                        {([
-                          {v:"vivid"   as const, label:"ビビッド"},
-                          {v:"natural" as const, label:"ナチュラル"},
-                          {v:"muted"   as const, label:"ミュート"},
-                        ]).map(({v,label}) => (
-                          <button key={v} onClick={()=>setPickerSat(v)}
-                            className={`flex-1 py-1 rounded-lg text-[10px] font-medium transition-all ${pickerSat===v?"bg-gold/10 border border-gold/20 text-gold":"glass border border-white/8 text-pearl-muted"}`}>
-                            {label}
+                  </div>
+                )}
+
+                {pickerInput === "sliders" && (
+                  <div>
+                    <p className="text-pearl-dim text-[10px] mb-2">色調・トーン</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {TONES.map(tone => {
+                        const swatch = computeHairColor(Math.max(pickerLevel, 7), tone, "natural");
+                        return (
+                          <button key={tone} onClick={()=>setPickerTone(tone)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium border transition-all ${pickerTone===tone?"border-gold/40 text-gold bg-gold/10":"border-white/10 text-pearl-muted hover:border-white/20"}`}>
+                            <span className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20"
+                              style={{background: swatch}}/>
+                            {tone}
                           </button>
-                        ))}
-                      </div>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
+                )}
 
-                {/* Tone selector */}
-                <div>
-                  <p className="text-pearl-dim text-[10px] mb-2">色調・トーン</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {TONES.map(tone => {
-                      const swatch = computeHairColor(Math.max(pickerLevel, 7), tone, "natural");
-                      return (
-                        <button key={tone} onClick={()=>setPickerTone(tone)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-medium border transition-all ${pickerTone===tone?"border-gold/40 text-gold bg-gold/10":"border-white/10 text-pearl-muted hover:border-white/20"}`}>
-                          <span className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20"
-                            style={{background: swatch}}/>
-                          {tone}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* Wheel mode */}
+                {pickerInput === "wheel" && (
+                  <ColorWheelPicker
+                    hue={wheelH} sat={wheelS} lig={wheelL}
+                    onChange={(h, s, l) => {
+                      setWheelH(h); setWheelS(s); setWheelL(l);
+                      const hex = hslToHex(h, s, l);
+                      setHexInputVal(hex.toUpperCase());
+                      const { level, tone, sat } = hexToPickerState(hex);
+                      setPickerLevel(level); setPickerTone(tone); setPickerSat(sat);
+                    }}
+                  />
+                )}
 
-                {/* Current selection + apply button */}
+                {/* HEX mode */}
+                {pickerInput === "hex" && (
+                  <HexInputPicker
+                    value={hexInputVal}
+                    onChange={hex => syncFromHex(hex)}
+                  />
+                )}
+
+                {/* Gallery mode */}
+                {pickerInput === "gallery" && (
+                  <HairColorGallery onSelect={hex => { syncFromHex(hex); setPickerInput("sliders"); }} />
+                )}
+
+                {/* Eyedropper mode */}
+                {pickerInput === "eyedropper" && (
+                  <EyedropperPicker
+                    defaultDataUrl={hairImageDataUrl}
+                    onColorPick={hex => { syncFromHex(hex); }}
+                  />
+                )}
+
+                {/* Current selection summary + apply */}
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 flex-1">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
                     <div className="w-8 h-8 rounded-full border-2 border-white/20 flex-shrink-0"
                       style={{background: previewColor}}/>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-pearl text-xs font-semibold">Lv.{pickerLevel} · {pickerTone}</p>
                       <p className="text-pearl-dim text-[10px] font-mono">{previewColor.toUpperCase()}</p>
                     </div>
                   </div>
-                  {colorTarget ? (
-                    <div className="flex items-center gap-1.5 text-emerald-400 text-xs">
+                  {colorTarget && (
+                    <div className="flex items-center gap-1.5 text-emerald-400 text-xs flex-shrink-0">
                       <CheckCircle size={13}/>設定済み
                     </div>
-                  ) : null}
+                  )}
                 </div>
+
+                {/* Photo recolor preview */}
+                {hairImageDataUrl && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-pearl-dim text-[10px] font-semibold">ヘアカラーシミュレーション（参考）</p>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setShowAfter(false)}
+                          className={`text-[10px] px-2.5 py-1 rounded-lg transition-all ${!showAfter?"bg-white/10 text-pearl":"text-pearl-dim/50"}`}>
+                          Before
+                        </button>
+                        <button onClick={() => setShowAfter(true)}
+                          className={`text-[10px] px-2.5 py-1 rounded-lg transition-all ${showAfter?"bg-gold/10 text-gold border border-gold/20":"text-pearl-dim/50"}`}>
+                          After
+                        </button>
+                      </div>
+                    </div>
+                    <canvas ref={recolorCanvasRef} className="w-full rounded-xl"/>
+                    <div className="flex items-center gap-3">
+                      <span className="text-pearl-dim text-[10px] whitespace-nowrap">強さ</span>
+                      <input type="range" min={20} max={100} value={Math.round(recolorStrength * 100)}
+                        onChange={e => setRecolorStrength(Number(e.target.value) / 100)}
+                        className="flex-1 h-1 rounded-full accent-gold cursor-pointer"/>
+                      <span className="text-pearl-dim text-[10px] font-mono w-8">{Math.round(recolorStrength * 100)}%</span>
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={applyPicker}
                   className="w-full py-3 bg-gold/10 border border-gold/20 text-gold rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:bg-gold/15 transition-all">
                   <Palette size={14}/> この色を目標カラーに設定
@@ -841,7 +1498,6 @@ export default function ColorExpertPage() {
 
           {showAddForm && (
             <div className="glass rounded-2xl overflow-hidden">
-              {/* Add mode selector */}
               <div className="flex gap-1 bg-white/5 p-1 m-4 rounded-xl">
                 {([
                   {k:"manual" as AddMode, label:"手入力"},
@@ -855,7 +1511,6 @@ export default function ColorExpertPage() {
                 ))}
               </div>
 
-              {/* ── Scan mode ── */}
               {addMode === "scan" && (
                 <div className="px-4 pb-4 space-y-3">
                   {scanImageUrl ? (
@@ -893,7 +1548,6 @@ export default function ColorExpertPage() {
                 </div>
               )}
 
-              {/* ── URL mode ── */}
               {addMode === "url" && (
                 <div className="px-4 pb-4 space-y-3">
                   <p className="text-pearl-dim text-xs">商品ページのURLを入力してください</p>
@@ -913,7 +1567,6 @@ export default function ColorExpertPage() {
                 </div>
               )}
 
-              {/* ── Manual / confirm form ── */}
               {addMode === "manual" && (
                 <div className="px-4 pb-4 space-y-3">
                   {(newItem.brand || newItem.name) && (
