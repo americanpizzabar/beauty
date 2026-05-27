@@ -136,7 +136,7 @@ export interface HairAnalysis {
   undertoneAnalysis: { red: number; yellow: number; orange: number };
   undertoneDescription: string;
   cuticleCondition: string;
-  recommendedOxi: "3%" | "6%" | "AC";
+  recommendedOxi: "3%" | "6%" | "9%" | "12%" | "AC";
   porosity: "low" | "medium" | "high";
   elasticity: "good" | "normal" | "poor";
   notes: string;

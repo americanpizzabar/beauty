@@ -1066,7 +1066,13 @@ export default function ColorExpertPage() {
                 <div>
                   <p className="text-gold/60 text-xs tracking-wider">推奨オキシ濃度</p>
                   <p className="text-pearl font-semibold">
-                    {hairAnalysis.recommendedOxi==="3%"?"3%（ダメージ配慮）":hairAnalysis.recommendedOxi==="6%"?"6%（標準）":"AC（低アルカリ・敏感肌向け）"}
+                    {({
+                      "3%":  "3%（ダメージ配慮・同〜暗め）",
+                      "6%":  "6%（標準・1〜2トーンアップ）",
+                      "9%":  "9%（2〜3トーンアップ）",
+                      "12%": "12%（ハイリフト専用）",
+                      "AC":  "AC（低アルカリ・敏感肌向け）",
+                    } as Record<string, string>)[hairAnalysis.recommendedOxi] ?? hairAnalysis.recommendedOxi}
                   </p>
                 </div>
               </div>
