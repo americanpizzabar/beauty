@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import {
   Sparkles, Database, Globe, ChevronDown, Star, ArrowRight,
   History, Trash2, ExternalLink, Edit2, Check, Plus, X,
+  Table2, MessageCircle, Send, ShieldCheck,
 } from "lucide-react";
 import PageWrapper from "@/components/PageWrapper";
 import type { RecommendationResult, ProductRecommendation } from "@/lib/types";
@@ -30,6 +31,24 @@ const TEXTURES = ["なめらか", "毛穴が目立つ", "凸凹・ざらつき",
 function formatDate(ts: number) {
   return new Date(ts).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+
+function shopLinks(brand: string, name: string) {
+  const q = encodeURIComponent(`${brand} ${name}`.trim());
+  return [
+    { label: "Google", url: `https://www.google.com/search?q=${q}+購入` },
+    { label: "Amazon", url: `https://www.amazon.co.jp/s?k=${q}` },
+    { label: "楽天", url: `https://search.rakuten.co.jp/search/mall/${q}/` },
+  ];
+}
+
+function scoreClass(score: number) {
+  if (score >= 90) return "bg-gold/20 text-gold";
+  if (score >= 75) return "bg-emerald-500/15 text-emerald-400";
+  if (score >= 60) return "bg-sky-500/15 text-sky-400";
+  return "bg-white/10 text-pearl-muted";
+}
+
+type DeepenAnswer = { answer: string; tips: string[]; relatedProducts: string[] };
 
 export default function RecommendPage() {
   const [step, setStep] = useState<"form" | "loading" | "results">("form");
@@ -432,9 +451,11 @@ export default function RecommendPage() {
             <p className="text-pearl-muted text-sm leading-relaxed">{result.skinAnalysis}</p>
           </div>
 
+          {result.products.length > 1 && <ComparisonTable products={result.products} />}
+
           <div>
             <h3 className="text-pearl text-base font-semibold mb-4" style={{ fontFamily: "var(--font-playfair,'Playfair Display',serif)" }}>
-              おすすめ商品 ({result.products.length}件)
+              おすすめ商品 詳細 ({result.products.length}件)
             </h3>
             <div className="space-y-4">
               {result.products.map((product, i) => (
@@ -470,12 +491,117 @@ export default function RecommendPage() {
   );
 }
 
+// ── Comparison table ───────────────────────────────────
+
+function ComparisonTable({ products }: { products: ProductRecommendation[] }) {
+  return (
+    <div className="glass rounded-2xl overflow-hidden">
+      <div className="px-5 pt-4 pb-3 flex items-center gap-2 border-b border-white/5">
+        <Table2 size={14} className="text-gold" />
+        <h3 className="text-pearl text-sm font-semibold tracking-wider">
+          全商品比較 ({products.length}件)
+        </h3>
+        <span className="text-pearl-dim/40 text-[10px] ml-auto">← 横にスクロール</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left min-w-[580px]">
+          <thead>
+            <tr className="border-b border-white/5">
+              {["#", "商品名 / ブランド", "カテゴリー", "価格", "マッチ度", "主成分"].map((h) => (
+                <th key={h} className="text-pearl-dim/60 text-[10px] px-4 py-3 font-semibold tracking-wider whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((item, i) => (
+              <tr key={item.id} className={`border-b border-white/5 transition-colors hover:bg-white/[0.02] ${i === products.length - 1 ? "border-b-0" : ""}`}>
+                <td className="px-4 py-3">
+                  {i === 0 ? (
+                    <div className="w-6 h-6 rounded-full bg-gold flex items-center justify-center">
+                      <Star size={10} fill="currentColor" className="text-obsidian" />
+                    </div>
+                  ) : (
+                    <span className="text-pearl-dim text-xs font-medium">{i + 1}</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 max-w-[160px]">
+                  {item.brand && <p className="text-gold/70 text-[10px] mb-0.5 truncate">{item.brand}</p>}
+                  <p className="text-pearl text-xs font-semibold leading-tight">{item.name}</p>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="text-pearl-muted text-[11px] whitespace-nowrap">{item.category || "—"}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="text-pearl-muted text-[11px] whitespace-nowrap">{item.price || "—"}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scoreClass(item.matchScore)}`}>
+                    {item.matchScore}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {item.keyIngredients?.slice(0, 2).map((ing, j) => (
+                      <span key={j} className="text-[9px] bg-white/5 text-pearl-dim px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                        {ing}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Individual product card ────────────────────────────
+
 function ProductCard({ product, rank }: { product: ProductRecommendation; rank: number }) {
   const [open, setOpen] = useState(false);
+  const [deepOpen, setDeepOpen] = useState(false);
+  const [thread, setThread] = useState<{ question: string; answer: DeepenAnswer }[]>([]);
+  const [deepQ, setDeepQ] = useState("");
+  const [deepLoading, setDeepLoading] = useState(false);
+  const [deepError, setDeepError] = useState<string | null>(null);
 
-  const searchUrl = product.purchaseUrl && product.purchaseUrl.startsWith("http")
-    ? product.purchaseUrl
-    : `https://www.google.com/search?q=${encodeURIComponent(`${product.brand} ${product.name} 購入`)}`;
+  const links = shopLinks(product.brand || "", product.name);
+
+  const handleDeepen = async () => {
+    if (!deepQ.trim() || deepLoading) return;
+    const question = deepQ.trim();
+    setDeepLoading(true);
+    setDeepError(null);
+    try {
+      const res = await fetch("/api/search/deepen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product: {
+            name: product.name,
+            brand: product.brand,
+            category: product.category,
+            price: product.price,
+            keyIngredients: product.keyIngredients,
+          },
+          question,
+          history: thread.map(t => ({ question: t.question, answer: t.answer.answer })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "エラーが発生しました");
+      setThread(prev => [...prev, { question, answer: data }]);
+      setDeepQ("");
+    } catch (err) {
+      setDeepError(err instanceof Error ? err.message : "エラーが発生しました");
+    } finally {
+      setDeepLoading(false);
+    }
+  };
 
   return (
     <div className="glass rounded-2xl overflow-hidden">
@@ -512,12 +638,22 @@ function ProductCard({ product, rank }: { product: ProductRecommendation; rank: 
 
         <p className="text-pearl-muted text-xs mt-2 ml-11 leading-relaxed">{product.reasons[0]}</p>
 
-        {/* Purchase link */}
-        <div className="mt-3 ml-11">
-          <a href={searchUrl} target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-gold/80 hover:text-gold transition-colors border border-gold/15 hover:border-gold/30 rounded-full px-3 py-1">
-            <ExternalLink size={11} /> 購入・詳細を検索する
-          </a>
+        {/* Purchase links */}
+        <div className="mt-3 ml-11 space-y-2">
+          {product.urlVerified && product.purchaseUrl && (
+            <a href={product.purchaseUrl} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 transition-colors border border-emerald-400/25 hover:border-emerald-400/40 rounded-full px-3 py-1">
+              <ShieldCheck size={11} /> 公式・購入ページ（リンク検証済み）
+            </a>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {links.map(({ label, url }) => (
+              <a key={label} href={url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] bg-white/5 text-pearl-dim hover:text-pearl hover:bg-white/10 transition-all">
+                <ExternalLink size={9} /> {label}で検索
+              </a>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -551,10 +687,109 @@ function ProductCard({ product, rank }: { product: ProductRecommendation; rank: 
               ))}
             </div>
           </div>
-          <a href={searchUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 glass-gold border border-gold/20 rounded-xl py-3 text-sm text-gold hover:bg-gold/10 transition-all">
-            <ExternalLink size={14} /> 購入・詳細を見る
-          </a>
+        </div>
+      )}
+
+      {/* Deep-dive conversation thread */}
+      <button onClick={() => setDeepOpen(!deepOpen)}
+        className="w-full flex items-center justify-center gap-1.5 py-3 border-t border-white/5 text-pearl-dim hover:text-gold text-xs transition-colors">
+        <MessageCircle size={11} />
+        {deepOpen ? "質問を閉じる" : "この商品について深掘りする"}
+        <ChevronDown size={10} className={`transition-transform ${deepOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {deepOpen && (
+        <div className="px-5 pb-5 border-t border-white/5">
+          <p className="text-pearl-dim/60 text-[11px] mt-3 mb-2 leading-relaxed">
+            この商品についてさらに知りたいことはありますか？前の質問の流れを踏まえてAIが続けてお答えします。
+          </p>
+
+          {thread.length > 0 && (
+            <div className="space-y-3 mb-3">
+              {thread.map((t, i) => (
+                <div key={i} className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="text-gold/60 text-[10px] font-bold mt-0.5 flex-shrink-0">Q{i + 1}</span>
+                    <p className="text-pearl text-xs leading-relaxed">{t.question}</p>
+                  </div>
+                  <div className="glass-gold rounded-xl p-3">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <div className="w-4 h-4 rounded-full bg-gold/20 flex items-center justify-center">
+                        <span className="text-gold text-[8px] font-bold">B</span>
+                      </div>
+                      <span className="text-gold text-[10px] font-semibold tracking-wider">AIの回答</span>
+                    </div>
+                    <p className="text-pearl-muted text-xs leading-relaxed">{t.answer.answer}</p>
+                    {t.answer.tips?.filter(Boolean).length > 0 && (
+                      <ul className="space-y-1.5 mt-2">
+                        {t.answer.tips.filter(Boolean).map((tip, j) => (
+                          <li key={j} className="flex items-start gap-2 text-xs text-pearl-muted">
+                            <span className="text-gold/60 flex-shrink-0 mt-0.5">✦</span>{tip}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {t.answer.relatedProducts?.filter(Boolean).length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-pearl-dim text-[10px] font-semibold tracking-wider mb-1.5">関連商品</p>
+                        <div className="flex flex-wrap gap-1">
+                          {t.answer.relatedProducts.filter(Boolean).map((p, j) => (
+                            <span key={j} className="text-[10px] bg-white/5 text-pearl-dim px-2 py-1 rounded-full border border-white/8">{p}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {thread.length === 0 && (
+            <p className="text-pearl-dim/40 text-[10px] mb-2">
+              例：敏感肌でも使えますか？ / 他の美容液と重ねて使えますか？ / 朝晩どちらで使うべき？
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <textarea
+              value={deepQ}
+              onChange={(e) => setDeepQ(e.target.value)}
+              placeholder={thread.length > 0 ? "続けて質問する..." : "質問を入力してください..."}
+              rows={2}
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-pearl text-xs placeholder:text-pearl-dim/40 focus:outline-none focus:border-gold/30 resize-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleDeepen();
+                }
+              }}
+            />
+            <button
+              onClick={handleDeepen}
+              disabled={deepLoading || !deepQ.trim()}
+              className={`px-3 rounded-xl text-xs font-semibold transition-all self-stretch flex items-center justify-center ${
+                deepQ.trim() && !deepLoading
+                  ? "bg-gold text-obsidian hover:bg-gold-light"
+                  : "bg-white/5 text-pearl-dim cursor-not-allowed"
+              }`}
+            >
+              {deepLoading ? (
+                <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Send size={12} />
+              )}
+            </button>
+          </div>
+
+          {deepError && <p className="text-red-400 text-xs mt-2">{deepError}</p>}
+
+          {thread.length > 0 && (
+            <button onClick={() => { setThread([]); setDeepQ(""); setDeepError(null); }}
+              className="text-pearl-dim/50 hover:text-pearl-dim text-[10px] transition-colors mt-3">
+              会話をクリア
+            </button>
+          )}
         </div>
       )}
     </div>

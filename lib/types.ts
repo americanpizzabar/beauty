@@ -75,6 +75,7 @@ export interface ProductRecommendation {
   keyIngredients: string[];
   source: "database" | "internet";
   purchaseUrl?: string;
+  urlVerified?: boolean;
 }
 
 export interface SearchResult {

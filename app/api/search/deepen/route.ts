@@ -6,11 +6,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "APIキーが設定されていません。" }, { status: 500 });
   }
   try {
-    const { product, question } = await req.json();
+    const { product, question, history } = await req.json();
     if (!product || !question?.trim()) {
       return NextResponse.json({ error: "商品情報と質問を入力してください" }, { status: 400 });
     }
-    const result = await deepenProductSearch(product, question);
+    const result = await deepenProductSearch(product, question, history);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

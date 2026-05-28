@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecommendations } from "@/lib/claude";
 import { searchProducts } from "@/lib/db";
+import { verifyUrls } from "@/lib/verifyUrl";
+import type { ProductRecommendation } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === "your_api_key_here") {
@@ -31,6 +33,16 @@ export async function POST(req: NextRequest) {
       useDatabase,
       dbProducts
     );
+
+    if (Array.isArray(result.products)) {
+      const products = result.products as ProductRecommendation[];
+      const flags = await verifyUrls(products.map(p => p.purchaseUrl));
+      result.products = products.map((p, i) => ({
+        ...p,
+        urlVerified: flags[i],
+        purchaseUrl: flags[i] ? p.purchaseUrl : undefined,
+      }));
+    }
 
     return NextResponse.json(result);
   } catch (error) {

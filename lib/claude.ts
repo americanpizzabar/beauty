@@ -127,7 +127,7 @@ JSON形式で回答（コードブロックなし）:
       "howToUse": "使用方法",
       "keyIngredients": ["主要成分1", "主要成分2"],
       "source": "database",
-      "purchaseUrl": "公式サイトURL or 購入できるサイトのURL（推定でも可）"
+      "purchaseUrl": "確証がある場合のみ公式ブランドサイトの商品ページURL。深い階層のURLを推測で作らないこと。不明なら空文字"
     }
   ],
   "skinAnalysis": "肌の状態分析（2-3文）",
@@ -158,7 +158,7 @@ JSON形式で回答（コードブロックなし）:
       "howToUse": "使用方法",
       "keyIngredients": ["主要成分1", "主要成分2"],
       "source": "internet",
-      "purchaseUrl": "公式サイトURL or 購入できるサイトのURL（推定でも可）"
+      "purchaseUrl": "確証がある場合のみ公式ブランドサイトの商品ページURL。深い階層のURLを推測で作らないこと。不明なら空文字"
     }
   ],
   "skinAnalysis": "肌の状態分析（2-3文）",
@@ -209,15 +209,19 @@ JSON形式で回答（コードブロックなし）。purchaseUrlは含めな�
 // ── 商品深掘り検索 ────────────────────────────────────
 export async function deepenProductSearch(
   product: { name: string; brand: string; category: string; price?: string; keyIngredients?: string[] },
-  question: string
+  question: string,
+  history?: { question: string; answer: string }[]
 ) {
+  const historySection = history && history.length > 0
+    ? `これまでの会話（文脈を踏まえて回答してください）:\n${history.map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.answer}`).join("\n")}\n\n`
+    : "";
   const prompt = `あなたはプロの美容コンサルタントです。以下の化粧品・美容品についての追加質問に詳しく答えてください。
 
 商品: ${product.brand} ${product.name}（${product.category}）
 価格: ${product.price || "不明"}
 主成分: ${product.keyIngredients?.join(", ") || "不明"}
 
-質問: 「${question}」
+${historySection}今回の質問: 「${question}」
 
 JSON形式のみで回答（コードブロックなし）:
 {
